@@ -4,3 +4,5 @@ pydantic
 google-generativeai
 youtube-transcript-api
 python-dotenv
+yt-dlp
+requests
