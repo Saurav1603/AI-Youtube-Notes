@@ -158,19 +158,39 @@ def extract_transcript_whisper(video_id: str) -> str:
         return text
 
 def extract_metadata_fallback(video_id: str) -> str:
-    full_url = f"https://www.youtube.com/watch?v={video_id}"
-    ydl_opts = {
-        'quiet': True,
-        'skip_download': True,
-        'extractor_args': {'youtube': ['player_client=android', 'player_skip=webpage']}
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(full_url, download=False)
-        title = info.get('title', 'Unknown Title')
-        desc = info.get('description', 'No description available.')
-        channel = info.get('uploader', 'Unknown Channel')
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+    
+    try:
+        # oEmbed is an official YouTube API for embeds and is NOT subject to the 
+        # aggressive IP bans that hit yt-dlp and web scrapers.
+        res = requests.get(oembed_url, timeout=10)
+        res.raise_for_status()
+        data = res.json()
         
+        title = data.get('title', 'Unknown Title')
+        channel = data.get('author_name', 'Unknown Channel')
+        
+        # We also attempt a lightweight regex search for the description 
+        # directly from the HTML source. This might fail if the IP is blocked,
+        # but it won't crash the generation.
+        desc = "No description available."
+        try:
+            html_res = requests.get(url, timeout=5)
+            if html_res.status_code == 200:
+                match = re.search(r'"shortDescription":"(.*?)"', html_res.text)
+                if match:
+                    # Clean up escaped quotes and newlines
+                    desc = match.group(1).replace('\\"', '"').replace('\\n', '\n')
+        except Exception:
+            pass
+            
         return f"Title: {title}\nChannel: {channel}\nDescription: {desc}"
+        
+    except Exception as e:
+        print(f"oEmbed fallback also failed: {e}")
+        # Absolute bare minimum fallback if even the official oEmbed API fails
+        return f"Title: YouTube Video {video_id}\nChannel: Unknown Channel\nDescription: No description available."
 
 def generate_notes_from_url(url: str) -> tuple[str, bool]:
     if not url or ("youtube.com" not in url and "youtu.be" not in url):
