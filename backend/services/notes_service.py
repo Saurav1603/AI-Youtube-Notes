@@ -3,6 +3,8 @@ import os
 import glob
 import tempfile
 import yt_dlp
+import requests
+import html
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
 from .llm_service import generate_final_notes
@@ -16,23 +18,72 @@ def extract_video_id(url: str) -> str:
         return match.group(1)
     return None
 
-def extract_transcript_api(video_id: str) -> str:
-    api = YouTubeTranscriptApi()
-    transcript_list = api.list(video_id)
+def extract_transcript_innertube(video_id: str) -> str:
+    """Uses YouTube InnerTube API to bypass IP blocks."""
+    url = "https://www.youtube.com/youtubei/v1/player"
+    payload = {
+        "context": {
+            "client": {
+                "clientName": "ANDROID",
+                "clientVersion": "17.31.35",
+                "androidSdkVersion": 30,
+                "userAgent": "com.google.android.youtube/17.31.35 (Linux; U; Android 11; en_US; Pixel 5 Build/RQ3A.210805.001.A1; gzip)"
+            }
+        },
+        "videoId": video_id
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "com.google.android.youtube/17.31.35"
+    }
     
+    res = requests.post(url, json=payload, headers=headers, timeout=15)
+    if res.status_code != 200:
+        raise Exception("InnerTube API blocked.")
+        
+    data = res.json()
+    caption_tracks = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
+    if not caption_tracks:
+        raise Exception("No caption tracks found via InnerTube.")
+        
+    en_track = next((t for t in caption_tracks if "en" in t.get("languageCode", "").lower()), caption_tracks[0])
+    track_url = en_track["baseUrl"]
+    
+    xml_res = requests.get(track_url, timeout=15)
+    if xml_res.status_code != 200:
+        raise Exception("Failed to fetch InnerTube XML track.")
+        
+    texts = re.findall(r'<text[^>]*>(.*?)</text>', xml_res.text)
+    texts = [html.unescape(t).replace("\n", " ") for t in texts]
+    
+    final_text = " ".join(texts).strip()
+    if not final_text:
+        raise Exception("Parsed empty transcript directly from InnerTube")
+        
+    return final_text
+
+def extract_transcript_api(video_id: str) -> str:
     try:
-        transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'hi'])
-    except NoTranscriptFound:
-        first_available = list(transcript_list)[0]
-        if first_available.is_translatable:
-            transcript = first_available.translate('en')
-        else:
-            transcript = first_available
-            
-    snippets = transcript.fetch()
-    return " ".join([snippet['text'] if isinstance(snippet, dict) else snippet.text for snippet in snippets])
+        return extract_transcript_innertube(video_id)
+    except Exception as e:
+        print(f"InnerTube bypass failed: {e}. Falling back to standard API.")
+        api = YouTubeTranscriptApi()
+        transcript_list = api.list(video_id)
+        
+        try:
+            transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'hi'])
+        except NoTranscriptFound:
+            first_available = list(transcript_list)[0]
+            if first_available.is_translatable:
+                transcript = first_available.translate('en')
+            else:
+                transcript = first_available
+                
+        snippets = transcript.fetch()
+        return " ".join([snippet['text'] if isinstance(snippet, dict) else snippet.text for snippet in snippets])
 
 def extract_transcript_ytdlp_subs(video_id: str) -> str:
+    full_url = f"https://www.youtube.com/watch?v={video_id}"
     with tempfile.TemporaryDirectory() as temp_dir:
         ydl_opts = {
             'quiet': True,
@@ -42,9 +93,10 @@ def extract_transcript_ytdlp_subs(video_id: str) -> str:
             'subtitleslangs': ['en', 'hi'],
             'subtitlesformat': 'vtt',
             'outtmpl': os.path.join(temp_dir, '%(id)s.%(ext)s'),
+            'extractor_args': {'youtube': ['player_client=android', 'player_skip=webpage']}
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_id])
+            ydl.download([full_url])
             
         vtt_files = glob.glob(os.path.join(temp_dir, '*.vtt'))
         if not vtt_files:
@@ -69,6 +121,7 @@ def extract_transcript_ytdlp_subs(video_id: str) -> str:
         return " ".join(unique_lines)
 
 def extract_transcript_whisper(video_id: str) -> str:
+    full_url = f"https://www.youtube.com/watch?v={video_id}"
     with tempfile.TemporaryDirectory() as temp_dir:
         ydl_opts = {
             'quiet': True,
@@ -79,42 +132,40 @@ def extract_transcript_whisper(video_id: str) -> str:
                 'preferredcodec': 'mp3',
                 'preferredquality': '128',
             }],
+            'extractor_args': {'youtube': ['player_client=android', 'player_skip=webpage']}
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Check duration to prevent server timeouts during synchronous transcription
-            info = ydl.extract_info(video_id, download=False)
+            info = ydl.extract_info(full_url, download=False)
             duration = info.get('duration', 0)
             if duration > 600:
                 raise ValueError(f"Video duration ({duration}s) exceeds the 10-minute limit for synchronous audio transcription. Aborting to prevent 504 Gateway Timeout.")
                 
-            ydl.download([video_id])
+            ydl.download([full_url])
             
         audio_files = glob.glob(os.path.join(temp_dir, '*.mp3'))
         if not audio_files:
             raise ValueError("Failed to download audio.")
             
         audio_path = audio_files[0]
-        
-        # Load faster-whisper model
-        # Using "tiny" to minimize RAM usage for cloud deployments (prevents Out of Memory errors)
         model = WhisperModel("tiny", device="cpu", compute_type="int8")
         
         segments, _ = model.transcribe(audio_path, beam_size=5)
         text = " ".join([segment.text for segment in segments])
         
-        # Audio file will be automatically deleted when TemporaryDirectory context exits
         if not text.strip():
             raise ValueError("Whisper transcribed empty text.")
             
         return text
 
 def extract_metadata_fallback(video_id: str) -> str:
+    full_url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
         'quiet': True,
         'skip_download': True,
+        'extractor_args': {'youtube': ['player_client=android', 'player_skip=webpage']}
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_id, download=False)
+        info = ydl.extract_info(full_url, download=False)
         title = info.get('title', 'Unknown Title')
         desc = info.get('description', 'No description available.')
         channel = info.get('uploader', 'Unknown Channel')
@@ -122,10 +173,6 @@ def extract_metadata_fallback(video_id: str) -> str:
         return f"Title: {title}\nChannel: {channel}\nDescription: {desc}"
 
 def generate_notes_from_url(url: str) -> tuple[str, bool]:
-    """
-    Pipeline to generate structured notes from a YouTube URL.
-    Returns (notes_text, is_metadata_fallback)
-    """
     if not url or ("youtube.com" not in url and "youtu.be" not in url):
         raise ValueError("Invalid YouTube URL provided.")
     
@@ -136,37 +183,28 @@ def generate_notes_from_url(url: str) -> tuple[str, bool]:
     full_text = ""
     is_metadata_fallback = False
     
-    # Level 1: API
     try:
-        print("Attempting Level 1: YouTubeTranscriptApi")
+        print("Attempting Level 1: YouTubeTranscriptApi / InnerTube")
         full_text = extract_transcript_api(video_id)
     except Exception as e1:
         print(f"Level 1 failed: {e1}")
-        
-        # Level 2: yt-dlp Subtitles
         try:
             print("Attempting Level 2: yt-dlp Subtitles")
             full_text = extract_transcript_ytdlp_subs(video_id)
         except Exception as e2:
             print(f"Level 2 failed: {e2}")
-            
-            # Level 3: Whisper Audio Transcription
             try:
                 print("Attempting Level 3: Whisper Audio Transcription")
                 full_text = extract_transcript_whisper(video_id)
             except Exception as e3:
                 print(f"Level 3 failed: {e3}")
-                
-                # Level 4: Metadata Fallback
                 try:
                     print("Attempting Level 4: Metadata Fallback")
                     full_text = extract_metadata_fallback(video_id)
                     is_metadata_fallback = True
                 except Exception as e4:
                     print(f"Level 4 failed: {e4}")
-                    raise ValueError("All extraction methods failed, including metadata extraction.")
+                    raise ValueError(f"All extraction methods failed, including metadata extraction. Error: {e4}")
     
-    # Pass the full text to Gemini
     final_notes = generate_final_notes(full_text, is_metadata=is_metadata_fallback)
-    
     return final_notes, is_metadata_fallback
