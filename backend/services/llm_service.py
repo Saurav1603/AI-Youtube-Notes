@@ -21,12 +21,17 @@ model = genai.GenerativeModel(
     generation_config=generation_config
 )
 
-def generate_final_notes(url: str) -> str:
+def generate_final_notes(content: str, is_metadata: bool = False) -> str:
     """
-    Takes the YouTube URL and generates structured notes natively using Gemini.
+    Takes the YouTube transcript or metadata and generates structured notes natively using Gemini.
     """
+    if is_metadata:
+        context_description = "Video Metadata (Title, Description, Channel)"
+    else:
+        context_description = "Video Transcript"
+
     prompt = f"""
-    Please watch the following YouTube video and convert its content into structured study notes with:
+    Please analyze the following {context_description} and convert its content into structured study notes with:
 
     1. Summary
     2. Key Points (bullets)
@@ -35,8 +40,8 @@ def generate_final_notes(url: str) -> str:
     
     Make it clear, concise, and student-friendly. Use Markdown formatting.
     
-    Video URL:
-    {url}
+    {context_description}:
+    {content}
     """
     try:
         response = model.generate_content(prompt)

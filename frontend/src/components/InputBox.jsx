@@ -36,7 +36,7 @@ const InputBox = ({ onSubmit, isLoading }) => {
           {isLoading ? (
             <>
               <Loader2 className="w-6 h-6 animate-spin" />
-              <span className="text-sm md:text-base hidden sm:inline">Generating...</span>
+              <span className="text-sm md:text-base hidden sm:inline">Extracting...</span>
             </>
           ) : (
             <>
@@ -46,9 +46,14 @@ const InputBox = ({ onSubmit, isLoading }) => {
           )}
         </button>
       </form>
-      <div className="mt-6 flex items-center justify-center space-x-2 text-sm font-semibold text-gray-600">
-        <span className="block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-        <p>Works best with videos that have closed captions available</p>
+      <div className="mt-6 flex flex-col items-center justify-center space-y-2 text-sm font-semibold text-gray-600">
+        <div className="flex items-center space-x-2">
+            <span className="block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            <p>Works best with videos that have closed captions available</p>
+        </div>
+        {isLoading && (
+            <p className="text-indigo-600 text-xs animate-pulse transition-opacity duration-500">Long videos without captions may take extra time to transcribe audio...</p>
+        )}
       </div>
     </div>
   );

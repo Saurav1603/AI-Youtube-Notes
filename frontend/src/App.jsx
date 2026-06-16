@@ -8,16 +8,19 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState(null);
   const [error, setError] = useState(null);
+  const [isMetadataFallback, setIsMetadataFallback] = useState(false);
 
   const fetchNotes = async (url) => {
     setLoading(true);
     setError(null);
     setNotes(null);
+    setIsMetadataFallback(false);
 
     try {
       const response = await generateNotes(url);
       if (response.success && response.notes) {
         setNotes(response.notes);
+        setIsMetadataFallback(response.is_metadata_fallback);
       } else {
         setError(response.error || "Failed to generate notes based on the provided URL.");
       }
@@ -94,6 +97,17 @@ function App() {
         {/* Results */}
         {!loading && notes && (
           <div className="w-full mt-12 animate-in fade-in slide-in-from-bottom-12 duration-700 delay-300 print:mt-0">
+            {isMetadataFallback && (
+              <div className="mb-6 p-4 glass-panel bg-yellow-50/80 border border-yellow-300 rounded-xl w-full flex items-start space-x-3 text-yellow-800 shadow-md">
+                <AlertCircle className="w-6 h-6 flex-shrink-0 text-yellow-600" />
+                <div>
+                  <h3 className="font-bold text-md">Transcript Unavailable</h3>
+                  <p className="text-sm mt-1 text-yellow-700/90 font-medium">
+                    Notes generated from video metadata (title and description) and may not exactly match the video content.
+                  </p>
+                </div>
+              </div>
+            )}
             <NotesDisplay notes={notes} />
           </div>
         )}
