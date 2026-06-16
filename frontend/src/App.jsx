@@ -94,20 +94,35 @@ function App() {
           </div>
         )}
 
+        {/* Loading State */}
+        {loading && (
+          <div className="w-full mt-12 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-8 duration-700 print:hidden">
+             <div className="glass-panel bg-white/40 border border-white/50 rounded-3xl p-8 shadow-xl animate-pulse flex flex-col space-y-8">
+                <div className="flex items-center space-x-4 mb-4">
+                  <div className="relative flex h-12 w-12 items-center justify-center">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-40"></span>
+                    <span className="relative inline-flex rounded-full h-8 w-8 bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg"></span>
+                  </div>
+                  <div className="h-6 bg-indigo-200/60 rounded-xl w-1/3"></div>
+                </div>
+                <div className="space-y-4 pl-1">
+                  <div className="h-4 bg-indigo-100/50 rounded-full w-full"></div>
+                  <div className="h-4 bg-indigo-100/50 rounded-full w-11/12"></div>
+                  <div className="h-4 bg-indigo-100/50 rounded-full w-5/6"></div>
+                </div>
+                <div className="h-6 bg-indigo-200/60 rounded-xl w-1/4 mt-8"></div>
+                <div className="space-y-4 pl-1">
+                  <div className="h-4 bg-indigo-100/50 rounded-full w-full"></div>
+                  <div className="h-4 bg-indigo-100/50 rounded-full w-4/5"></div>
+                  <div className="h-4 bg-indigo-100/50 rounded-full w-3/4"></div>
+                </div>
+             </div>
+          </div>
+        )}
+
         {/* Results */}
         {!loading && notes && (
           <div className="w-full mt-12 animate-in fade-in slide-in-from-bottom-12 duration-700 delay-300 print:mt-0">
-            {isMetadataFallback && (
-              <div className="mb-6 p-4 glass-panel bg-yellow-50/80 border border-yellow-300 rounded-xl w-full flex items-start space-x-3 text-yellow-800 shadow-md">
-                <AlertCircle className="w-6 h-6 flex-shrink-0 text-yellow-600" />
-                <div>
-                  <h3 className="font-bold text-md">Transcript Unavailable</h3>
-                  <p className="text-sm mt-1 text-yellow-700/90 font-medium">
-                    Notes generated from video metadata (title and description) and may not exactly match the video content.
-                  </p>
-                </div>
-              </div>
-            )}
             <NotesDisplay notes={notes} />
           </div>
         )}
